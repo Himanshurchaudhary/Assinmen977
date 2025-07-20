@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Solar System Simulation</title>
+    <!-- Tailwind CSS CDN for basic styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Inter font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- OrbitControls for camera interaction -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden; /* Hide scrollbars */
+            font-family: 'Inter', sans-serif;
+            background-color: #0d1117; /* Dark background for space */
+            color: #e6edf3; /* Light text color */
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        #webgl-output {
+            flex-grow: 1;
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        #control-panel {
+            position: absolute;
+            top: 1rem;
+            left: 1rem;
+            background-color: rgba(25, 28, 33, 0.85); /* Slightly transparent dark background */
+            padding: 1rem;
+            border-radius: 0.75rem; /* Rounded corners */
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            max-height: calc(100vh - 2rem); /* Limit height for responsiveness */
+            overflow-y: auto; /* Enable scrolling if content overflows */
+            width: 90%; /* Responsive width */
+            max-width: 350px; /* Max width for larger screens */
+            z-index: 10;
+        }
+
+        @media (max-width: 768px) {
+            #control-panel {
+                top: 0.5rem;
+                left: 0.5rem;
+                right: 0.5rem;
+                width: auto;
+                max-width: none;
+                padding: 0.75rem;
+            }
+        }
+
+        .planet-control {
+            margin-bottom: 0.75rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .planet-control:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        input[type="range"] {
+            width: 100%;
+            -webkit-appearance: none;
+            height: 0.25rem;
+            background: #4a5568;
+            outline: none;
+            opacity: 0.7;
+            transition: opacity .2s;
+            border-radius: 0.25rem;
+        }
+        input[type="range"]:hover {
+            opacity: 1;
+        }
+
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 1rem;
+    height: 1rem;
+    border-radius: 50%;
+    background: #63b3ed;
+    cursor: pointer;
+    box-shadow: 0 0 0 2px rgba(99, 179, 237, 0.5);
+}
+
+input[type="range"]::-moz-range-thumb {
+    width: 1rem;
+    height: 1rem;
+    border-radius: 50%;
+    background: #63b3ed;
+    cursor: pointer;
+    box-shadow: 0 0 0 2px rgba(99, 179, 237, 0.5);
+}
+
+
+        button {
+            background-color: #63b3ed; /* Blue button */
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+        button:hover {
+            background-color: #4299e1; /* Darker blue on hover */
+        }
+        button:active {
+            transform: translateY(1px);
+        }
+        .tooltip {
+            position: absolute;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            pointer-events: none; /* Allow mouse events to pass through */
+            opacity: 0;
+            transition: opacity 0.2s ease-in-out;
+            z-index: 20;
+        }
+        .tooltip.active {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+    <div id="control-panel">
+        <h2 class="text-xl font-bold mb-4 text-center">Solar System Controls</h2>
+        <div id="planet-sliders">
+            <!-- Sliders will be dynamically added here by JavaScript -->
+        </div>
+        <div class="mt-4 flex justify-center">
+            <button id="pauseResumeBtn">Pause</button>
+        </div>
+    </div>
+
+    <div id="webgl-output"></div>
+
+    <div id="tooltip" class="tooltip"></div>
+
+    <script>
+        // Global variables for Three.js scene components
+        let scene, camera, renderer, controls;
+        let clock = new THREE.Clock();
+        let planets = [];
+        let isPaused = false;
+        let tooltipElement;
+
+        // Planet data (radius, distance from Sun, color, orbital speed, axial rotation speed)
+        // Values are scaled for visualization purposes, not scientifically accurate.
+        const planetData = [
+            { name: "Mercury", radius: 0.5, distance: 5, color: 0x888888, orbitalSpeed: 0.05, rotationSpeed: 0.01 },
+            { name: "Venus", radius: 0.8, distance: 8, color: 0xddccaa, orbitalSpeed: 0.035, rotationSpeed: 0.005 },
+            { name: "Earth", radius: 1.0, distance: 12, color: 0x0077ff, orbitalSpeed: 0.03, rotationSpeed: 0.02 },
+            { name: "Mars", radius: 0.7, distance: 16, color: 0xff4400, orbitalSpeed: 0.025, rotationSpeed: 0.018 },
+            { name: "Jupiter", radius: 3.0, distance: 25, color: 0xccaa88, orbitalSpeed: 0.015, rotationSpeed: 0.03 },
+            { name: "Saturn", radius: 2.5, distance: 35, color: 0xddddbb, orbitalSpeed: 0.01, rotationSpeed: 0.025 },
+            { name: "Uranus", radius: 2.0, distance: 45, color: 0xaaddff, orbitalSpeed: 0.007, rotationSpeed: 0.015 },
+            { name: "Neptune", radius: 1.9, distance: 55, color: 0x6688ff, orbitalSpeed: 0.005, rotationSpeed: 0.012 }
+        ];
+
+        // Function to initialize the Three.js scene
+        function init() {
+            // Scene
+            scene = new THREE.Scene();
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 50, 70); // Initial camera position
+
+            // Renderer
+            const webglOutput = document.getElementById('webgl-output');
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(webglOutput.clientWidth, webglOutput.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            webglOutput.appendChild(renderer.domElement);
+
+            // OrbitControls for camera interaction
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true; // Smooth camera movement
+            controls.dampingFactor = 0.05;
+            controls.screenSpacePanning = false;
+            controls.minDistance = 10;
+            controls.maxDistance = 200;
+
+            // Lighting
+            // Ambient light to illuminate all objects slightly
+            const ambientLight = new THREE.AmbientLight(0x333333);
+            scene.add(ambientLight);
+
+            // Point light for the Sun
+            const sunLight = new THREE.PointLight(0xffffff, 2, 0, 2); // Color, intensity, distance, decay
+            sunLight.position.set(0, 0, 0); // At the center where the Sun is
+            scene.add(sunLight);
+
+            // Create the Sun
+            const sunGeometry = new THREE.SphereGeometry(6, 64, 64);
+            const sunMaterial = new THREE.MeshBasicMaterial({ color: 0xffaa00 }); // Basic material as Sun is light source
+            const sun = new THREE.Mesh(sunGeometry, sunMaterial);
+            scene.add(sun);
+
+            // Create Planets
+            planetData.forEach(data => {
+                const geometry = new THREE.SphereGeometry(data.radius, 32, 32);
+                const material = new THREE.MeshStandardMaterial({ color: data.color }); // Standard material for planets
+                const planet = new THREE.Mesh(geometry, material);
+                planet.name = data.name; // Assign name for identification
+                planet.userData = {
+                    distance: data.distance,
+                    orbitalSpeed: data.orbitalSpeed,
+                    rotationSpeed: data.rotationSpeed,
+                    angle: Math.random() * Math.PI * 2 // Random initial angle
+                };
+                scene.add(planet);
+                planets.push(planet);
+            });
+
+            // Add background stars
+            createStars();
+
+            // Initialize control panel
+            initControlPanel();
+
+            // Initialize tooltip element
+            tooltipElement = document.getElementById('tooltip');
+
+            // Event listeners for responsiveness
+            window.addEventListener('resize', onWindowResize, false);
+            webglOutput.addEventListener('mousemove', onDocumentMouseMove, false);
+        }
+
+        // Function to create background stars
+        function createStars() {
+            const starGeometry = new THREE.BufferGeometry();
+            const starMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 0.5 });
+
+            const starVertices = [];
+            for (let i = 0; i < 10000; i++) { // 10,000 stars
+                const x = (Math.random() - 0.5) * 2000;
+                const y = (Math.random() - 0.5) * 2000;
+                const z = (Math.random() - 0.5) * 2000;
+                starVertices.push(x, y, z);
+            }
+            starGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starVertices, 3));
+            const stars = new THREE.Points(starGeometry, starMaterial);
+            scene.add(stars);
+        }
+
+        // Function to handle window resizing
+        function onWindowResize() {
+            const webglOutput = document.getElementById('webgl-output');
+            camera.aspect = webglOutput.clientWidth / webglOutput.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(webglOutput.clientWidth, webglOutput.clientHeight);
+        }
+
+        // Raycaster for hover effects
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        let INTERSECTED;
+
+        function onDocumentMouseMove(event) {
+            // Calculate mouse position in normalized device coordinates (-1 to +1)
+            const webglOutput = document.getElementById('webgl-output');
+            mouse.x = (event.clientX / webglOutput.clientWidth) * 2 - 1;
+            mouse.y = -(event.clientY / webglOutput.clientHeight) * 2 + 1;
+
+            // Update the raycaster with the camera and mouse position
+            raycaster.setFromCamera(mouse, camera);
+
+            // Find intersecting objects (planets)
+            const intersects = raycaster.intersectObjects(planets);
+
+            if (intersects.length > 0) {
+                if (INTERSECTED != intersects[0].object) {
+                    if (INTERSECTED) {
+                        // Restore original color if previously intersected
+                        INTERSECTED.material.emissive.setHex(INTERSECTED.currentHex);
+                    }
+                    INTERSECTED = intersects[0].object;
+                    INTERSECTED.currentHex = INTERSECTED.material.emissive.getHex();
+                    INTERSECTED.material.emissive.setHex(0x333333); // Highlight color
+
+                    // Show tooltip
+                    tooltipElement.classList.add('active');
+                    tooltipElement.style.left = `${event.clientX + 10}px`;
+                    tooltipElement.style.top = `${event.clientY + 10}px`;
+                    tooltipElement.textContent = INTERSECTED.name;
+                }
+            } else {
+                if (INTERSECTED) {
+                    // Restore original color if no longer intersecting
+                    INTERSECTED.material.emissive.setHex(INTERSECTED.currentHex);
+                }
+                INTERSECTED = null;
+                // Hide tooltip
+                tooltipElement.classList.remove('active');
+            }
+        }
+
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (!isPaused) {
+                const delta = clock.getDelta(); // Time elapsed since last frame
+
+                planets.forEach(planet => {
+                    // Update orbital angle based on speed and delta time
+                    planet.userData.angle += planet.userData.orbitalSpeed * delta;
+
+                    // Calculate new position in orbit
+                    planet.position.x = planet.userData.distance * Math.cos(planet.userData.angle);
+                    planet.position.z = planet.userData.distance * Math.sin(planet.userData.angle);
+
+                    // Rotate planet on its own axis
+                    planet.rotation.y += planet.userData.rotationSpeed * delta;
+                });
+            }
+
+            controls.update(); // Update OrbitControls
+            renderer.render(scene, camera); // Render the scene
+        }
+
+        // Function to initialize the control panel
+        function initControlPanel() {
+            const planetSlidersDiv = document.getElementById('planet-sliders');
+            planets.forEach(planet => {
+                const planetControlDiv = document.createElement('div');
+                planetControlDiv.className = 'planet-control';
+                planetControlDiv.innerHTML = `
+                    <label for="${planet.name}-speed" class="block text-sm font-medium text-gray-300 mb-1">${planet.name} Orbital Speed:</label>
+                    <input type="range" id="${planet.name}-speed" min="0" max="0.1" step="0.001" value="${planet.userData.orbitalSpeed}" class="w-full">
+                    <span id="${planet.name}-speed-value" class="text-xs text-gray-400 mt-1 block text-right">${planet.userData.orbitalSpeed.toFixed(3)}</span>
+                `;
+                planetSlidersDiv.appendChild(planetControlDiv);
+
+                const slider = document.getElementById(`${planet.name}-speed`);
+                const valueSpan = document.getElementById(`${planet.name}-speed-value`);
+
+                slider.addEventListener('input', (event) => {
+                    const newSpeed = parseFloat(event.target.value);
+                    planet.userData.orbitalSpeed = newSpeed;
+                    valueSpan.textContent = newSpeed.toFixed(3);
+                });
+            });
+
+            // Pause/Resume button functionality
+            const pauseResumeBtn = document.getElementById('pauseResumeBtn');
+            pauseResumeBtn.addEventListener('click', () => {
+                isPaused = !isPaused;
+                pauseResumeBtn.textContent = isPaused ? 'Resume' : 'Pause';
+            });
+        }
+
+        // Ensure the animation starts after the window has loaded
+        window.onload = function () {
+            init();
+            animate();
+        };
+    </script>
+</body>
+</html>
